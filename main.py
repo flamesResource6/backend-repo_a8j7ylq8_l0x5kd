@@ -1,9 +1,13 @@
-import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Optional
+from database import create_document, get_documents, db
+from schemas import ContactMessage
 
-app = FastAPI()
+app = FastAPI(title="Elev8 API", description="Backend for Elev8 AI upskilling platform", version="1.0.0")
 
+# CORS for frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -12,60 +16,98 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Health
 @app.get("/")
-def read_root():
-    return {"message": "Hello from FastAPI Backend!"}
+def root():
+    return {"status": "ok", "service": "elev8-api"}
 
-@app.get("/api/hello")
-def hello():
-    return {"message": "Hello from the backend API!"}
-
+# Test DB connection helper
 @app.get("/test")
-def test_database():
-    """Test endpoint to check if database is available and accessible"""
-    response = {
-        "backend": "✅ Running",
-        "database": "❌ Not Available",
-        "database_url": None,
-        "database_name": None,
-        "connection_status": "Not Connected",
-        "collections": []
-    }
-    
+def test_db():
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
     try:
-        # Try to import database module
-        from database import db
-        
-        if db is not None:
-            response["database"] = "✅ Available"
-            response["database_url"] = "✅ Configured"
-            response["database_name"] = db.name if hasattr(db, 'name') else "✅ Connected"
-            response["connection_status"] = "Connected"
-            
-            # Try to list collections to verify connectivity
-            try:
-                collections = db.list_collection_names()
-                response["collections"] = collections[:10]  # Show first 10 collections
-                response["database"] = "✅ Connected & Working"
-            except Exception as e:
-                response["database"] = f"⚠️  Connected but Error: {str(e)[:50]}"
-        else:
-            response["database"] = "⚠️  Available but not initialized"
-            
-    except ImportError:
-        response["database"] = "❌ Database module not found (run enable-database first)"
+        # simple ping by counting collections
+        _ = db.list_collection_names()
+        return {"ok": True}
     except Exception as e:
-        response["database"] = f"❌ Error: {str(e)[:50]}"
-    
-    # Check environment variables
-    import os
-    response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
-    response["database_name"] = "✅ Set" if os.getenv("DATABASE_NAME") else "❌ Not Set"
-    
-    return response
+        raise HTTPException(status_code=500, detail=str(e))
 
+# In-memory course list for demo display (no writes). Real persistence can be added later if needed.
+COURSES = [
+    {
+        "id": "genai-pro",
+        "title": "Generative AI for Professionals",
+        "level": "Intermediate",
+        "duration": "6 weeks",
+        "color": "purple",
+        "tag": "Popular",
+        "modules": 8
+    },
+    {
+        "id": "mlops-essentials",
+        "title": "MLOps Essentials",
+        "level": "Advanced",
+        "duration": "4 weeks",
+        "color": "orange",
+        "tag": "New",
+        "modules": 6
+    },
+    {
+        "id": "prompt-engineering",
+        "title": "Prompt Engineering Mastery",
+        "level": "Beginner",
+        "duration": "3 weeks",
+        "color": "pink",
+        "tag": "Trending",
+        "modules": 5
+    },
+    {
+        "id": "ai-product-mgmt",
+        "title": "AI Product Management",
+        "level": "Intermediate",
+        "duration": "5 weeks",
+        "color": "blue",
+        "tag": "Team Favorite",
+        "modules": 7
+    }
+]
 
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+@app.get("/courses")
+def list_courses():
+    return {"courses": COURSES}
+
+# Blog list sample (read-only for now)
+BLOGS = [
+    {
+        "id": "industry-ai-trends-2025",
+        "title": "Industry AI Trends 2025",
+        "excerpt": "From copilots to autonomous workflows, here’s what’s next.",
+        "tag": "Insights"
+    },
+    {
+        "id": "roi-of-ai-upskilling",
+        "title": "The ROI of AI Upskilling",
+        "excerpt": "How teams accelerate delivery and reduce costs with the right skills.",
+        "tag": "Research"
+    },
+    {
+        "id": "governance-guardrails",
+        "title": "Governance & Guardrails for Enterprise GenAI",
+        "excerpt": "Balancing innovation with risk and compliance.",
+        "tag": "Enterprise"
+    }
+]
+
+@app.get("/blogs")
+def list_blogs():
+    return {"posts": BLOGS}
+
+# Contact form endpoint - persists to DB
+@app.post("/contact")
+def submit_contact(msg: ContactMessage):
+    try:
+        doc_id = create_document("contactmessage", msg)
+        return {"ok": True, "id": doc_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
